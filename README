@@ -1,0 +1,115 @@
+Linux/Solaris/OS X - TelnetEnable Utility
+Version 0.4 October 18, 2009
+retro98se @ gmail.com with modifications by dragonslair @ gmail.com
+
+
+Netgear routers running factory firmware often have a built in telnet daemon
+that listens on TCP port 23. Accessing this hidden command line interface (CLI)
+first requires sending a magic packet to the daemon, to unlock it.
+The "telnetenable" utility generates and sends the packet to the router.
+
+This telnetenable is a Linux/Solaris/OS X version of Netgear's
+telnetenable.exe utility for Windows. To use the prebuilt binaries, select
+telnetenable.linux, telnetenable.solaris, or telnetenable.osx, depending on
+your platform. Rename one of them as telnetenable.
+
+
+Usage:
+	$ ./telnetenable
+	Version: 0.4, 2009/10/18
+	Usage: ./telnetenable <host ip> <host mac> <user name> [password]
+	$
+	    
+<host ip>   the router's IP address
+<host mac>  the router's MAC address as a capitalized string of hex digits
+<user name> Netgear's default "Gearguy"
+[password]  Netgear's default "Geardog"
+
+
+Example:
+	$ ./telnetenable 192.168.1.1 001E3A04E2EB Gearguy Geardog
+	$ telnet 192.168.1.1
+
+	BusyBox v0.60.0 (2008.05.15-10:32+0000) Built-in shell (msh)
+	Enter 'help' for a list of built-in commands.
+
+	# version
+	Release version : Netgear Wireless Router WGR614v8
+	                  U12H07200/V1.1.11/6.0.36NA
+	           Time : May 15 2008 18:35:41
+	# exit
+
+
+Compiling the source code on Linux:
+	$ make
+
+
+Compiling the source code on Solaris:
+	$ LIBS="-lresolv -lsocket -lnsl" make -e
+or edit the Makefile and define "LIBS" as above, then run "make"
+
+
+Compiling the source code on OS X:
+	$ make
+or open telnetenable.xcodeproj in Xcode and build to make a universal binary
+
+
+Version 0.4 October 18, 2009 revisions:
+dragonslair @ gmail.com:
+ . Fix further buffer issues in order to not SIGABRT on OS X
+ . Add basic input checking
+ . Add OS X binaries
+retro98se @ gmail.com:
+ . Send all usage and error messages to stderr
+ . Remove unused variables and code
+
+
+Version 0.3 June 24, 2009 revisions:
+retro98se @ gmail.com:
+ . Send magic packet in one socket write. With Solaris, router does
+   not recognize magic packet with one character at a time socket writes.
+ . Send packet data to standard output (restores original telnetenable
+   behavior) when host IP is "-"
+ . Include Makefile
+ . Code for endian independence
+ . Limit string copies to buffer sizes
+ . Resolve several compiler errors and warnings
+
+
+Version 0.2
+	http://www.seattlewireless.net/telnetenable.c
+
+
+Version 0.1 README:
+
+telnetenable
+
+This is a tool for activating the listening mode of the telnet console
+on some Netgear routers. For more information, please refer to
+  http://wiki.openwrt.org/OpenWrtDocs/Hardware/Netgear/TelnetConsole
+
+Please read the telnetenable.c header for additional information on 
+copyright and licensing terms.
+
+Please note that this tool is currently lacking a socket layer
+implementation, and is therefore only usable to craft individual magic
+packets, but not to send them to the router.
+
+To compile, use
+  gcc -o telnetenable telnetenable.c md5.c Blowfish.c
+
+To run it, pass the same parameters as you would pass to the original 
+tool (telnetEnable.exe by Netgear) upon command line invocation. You
+can see the usage by simply running
+  ./telnetenable
+
+Please note that this software is completely unsupported. 
+
+An updated version providing a network layer implementation may or may 
+not be provided in the future. If you would like to contribute any 
+patches or have crafted modified versions (you are welcome to do so
+under the terms of the GPL!), we would appreciate a hint.
+
+This software is made available by alsterwassermann AT gmx D0T de on 
+behalf of its author yoshac AT member D0T fsf D0T org. If you need to get in 
+touch for reasons other than usage support, please contact both of us.
