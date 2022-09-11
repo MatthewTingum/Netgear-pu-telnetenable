@@ -5,7 +5,7 @@ CFLAGS =
 # Solaris LIBS
 # LIBS = -lresolv -lsocket -lnsl
 # Linux LIBS
-LIBS =
+LIBS = -lcrypto
 
 INCLUDES =
 OBJS = telnetenable.o blowfish.o md5.o

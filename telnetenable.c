@@ -1,11 +1,11 @@
 /*
-  version 0.4 October 18, 2009
+  Original code credits to:
   retro98se @ gmail.com with modifications by dragonslair @ gmail.com
 
-  See README for changes
+  See README.orig for previous changes
 */ 
 /*
-  This program is a re-implementation of the telnet console enabler utility
+  This program is a re-re-implementation of the telnet console enabler utility
   for use with Netgear wireless routers.
   
   The original Netgear Windows binary version of this tool is available here:
@@ -39,64 +39,86 @@
 */
 
 #include <sys/types.h>
+#include <arpa/inet.h>
 #include <netinet/tcp.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netdb.h>
 
+#include <ctype.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+
+#include <openssl/sha.h>
 
 #include "md5.h"
 #include "blowfish.h"
 
 #define PORT 23
+#define SECRET_KEY_PART "AMBIT_TELNET_ENABLE+"
+#define SHA_256_STR_LEN SHA256_DIGEST_LENGTH*2
+#define MAC_ADDR_STR_LEN        12
 
-static char output_buf[0x100];
 
-static BLOWFISH_CTX ctx;
-
-struct PAYLOAD
+__attribute__((packed))
+struct payload
 {
 	char signature[0x10];
 	char mac[0x10];
 	char username[0x10];
-	char password[0x10];
-	char reserved[0x40];
-} payload;
+	char password_hash[0x41];
+	char reserved[0x10];
+};
 
 void usage(char * progname)
 {
-	fprintf(stderr, "Version: 0.4, 2009/10/18\n");
+	fprintf(stderr, "Netgear telnetenable\n");
 	fprintf(stderr,
-		"Usage: %s <host ip> <host mac> <user name> [password]\n",
+		"Usage: %s <host ip> <host mac> <user name> <password>\n",
 		progname);
 	exit(1);
 }
 
-int socket_connect(char *host, in_port_t port){
-   struct hostent *hp;
-   struct sockaddr_in addr;
-   int on = 1, sock;
+char *sha256_string(const char *string)
+{
+    unsigned char hash[SHA256_DIGEST_LENGTH];
+    char *password_hash = malloc(SHA_256_STR_LEN + 1);
+    SHA256_CTX sha256;
+    SHA256_Init(&sha256);
+    SHA256_Update(&sha256, string, strlen(string));
+    SHA256_Final(hash, &sha256);
+    int i = 0;
+    for(i = 0; i < SHA256_DIGEST_LENGTH; i++)
+    {
+        sprintf(password_hash + (i * 2), "%02x", hash[i]);
+    }
+    password_hash[64] = 0;
+    return password_hash;
+}
 
-   if((hp = gethostbyname(host)) == NULL){
-      herror("gethostbyname");
-      exit(1);
-   }
-   bcopy(hp->h_addr, &addr.sin_addr, hp->h_length);
-   addr.sin_port = htons(port);
-   addr.sin_family = AF_INET;
-   sock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
-   setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, (const char *)&on, sizeof(int));
-   if(sock == -1){
-      perror("setsockopt");
-      exit(1);
-   }
-   if(connect(sock, (struct sockaddr *)&addr, sizeof(struct sockaddr_in)) == -1){
-      perror("connect");
-      exit(1);
-   }
-   return sock;
+int send_payload(const char *host, in_port_t port, char *payload, size_t payload_len) { 
+    int sockfd;
+    struct sockaddr_in servaddr;
+
+    if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0 ) {
+        perror("socket creation failed");
+        exit(EXIT_FAILURE);
+    }
+
+    memset(&servaddr, 0, sizeof(servaddr));
+
+    servaddr.sin_family = AF_INET;
+    servaddr.sin_port = htons(port);
+    servaddr.sin_addr.s_addr = inet_addr(host);
+
+    sendto(sockfd, payload, payload_len,
+        MSG_CONFIRM, (const struct sockaddr*)&servaddr, sizeof(servaddr));
+    printf("Sent telnet enable packet\n");
+
+    close(sockfd);
+    return 0;
 }
 
 int GetOutputLength(unsigned int lInputLong)
@@ -109,13 +131,26 @@ int GetOutputLength(unsigned int lInputLong)
 		return lInputLong;
 }
 
-int EncodeString(BLOWFISH_CTX *ctx,char *pInput,char *pOutput, int lSize)
+ssize_t EncodeString(char *pInput, char **crypted_buf, int lSize, char *key, size_t key_len)
 {
-	int lCount;
+	ssize_t lCount = -1;
 	int lOutSize;
 	int i;
+        char *crypt_tmp = NULL;
+        BLOWFISH_CTX ctx;
 
+        // Create a buffer long enough to hold the blowfish output
 	lOutSize = GetOutputLength(lSize);
+        *crypted_buf = malloc(lOutSize);
+        if (*crypted_buf == NULL) {
+            fprintf(stderr, "Failed to allocate memory for encrypted buffer\n");
+            goto out;
+        }
+        crypt_tmp = *crypted_buf;
+
+
+	Blowfish_Init(&ctx, key, key_len);
+
 	lCount=0;
 	while (lCount<lOutSize)
 	{
@@ -126,66 +161,105 @@ int EncodeString(BLOWFISH_CTX *ctx,char *pInput,char *pOutput, int lSize)
 			xl = (xl << 8) | (*(pInput+i) & 0xff);
 			xr = (xr << 8) | (*(pInput+i+4) & 0xff);
 		}
-		Blowfish_Encrypt(ctx, &xl, &xr);
+		Blowfish_Encrypt(&ctx, &xl, &xr);
 		for (i=0; i<4; i++) {
-			*(pOutput+i) = xl & 0xff;
+			*(crypt_tmp+i) = xl & 0xff;
 			xl >>= 8;
-			*(pOutput+i+4) = xr & 0xff;
+			*(crypt_tmp+i+4) = xr & 0xff;
 			xr >>= 8;
 		}
 		pInput+=8;
-		pOutput+=8;
+		crypt_tmp+=8;
 		lCount+=8;
 	}
 
+out:
 	return lCount;
 }
 
-int fill_payload(int argc, char * input[])
+void fill_payload(const char *rhost_mac_addr, const char *username, const char *password, struct payload *payload)
 {
 	MD5_CTX MD;
-	char MD5_key[0x10];
-	char secret_key[0x100]="AMBIT_TELNET_ENABLE+";
-	int encoded_len;
-	
-	memset(&payload, 0, sizeof(payload));
+	char md5_key[0x10];
 
-	strncpy(payload.mac, input[2], 0x10);
-	strncpy(payload.username, input[3], 0x10);
+	memset(payload, 0, sizeof(*payload));
 
-	if (argc==5)
-		strncpy(payload.password, input[4], 0x10);
+	strncpy(payload->mac, rhost_mac_addr, sizeof(payload->mac));
+	strncpy(payload->username, username, sizeof(payload->username));
+
+        char *password_hash = sha256_string(password);
+	strncpy(payload->password_hash, password_hash, sizeof(payload->password_hash));
 
 	MD5Init(&MD);
-	MD5Update(&MD,payload.mac,0x70);
-	MD5Final(MD5_key,&MD);
+	MD5Update(&MD, payload->mac, sizeof(payload->mac));
+	MD5Update(&MD, payload->username, sizeof(payload->username));
+	MD5Update(&MD, password_hash, SHA_256_STR_LEN);
+	MD5Update(&MD, payload->reserved, sizeof(payload->reserved));
+	MD5Final(md5_key, &MD);
 
-	memcpy(payload.signature, MD5_key, 0x10);
+	memcpy(payload->signature, md5_key, 0x10);
 
-	if (argc==5)
-		strncat(secret_key,input[4], 0x10);
-
-	Blowfish_Init(&ctx,secret_key,strlen(secret_key));
-
-	encoded_len = EncodeString(&ctx, (char*)&payload,
-		(char*)&output_buf, 0x80);
-	
-	return encoded_len;
+        free(password_hash);
+	return;
 }
-	
+
+static ssize_t generate_crypted_payload(struct payload *payload, char **crypted_payload) {
+    ssize_t crypted_payload_len = -1;
+    // TODO: fix buffer length
+    char secret_key[sizeof(SECRET_KEY_PART)+SHA_256_STR_LEN+99] = SECRET_KEY_PART;
+
+    // Generate the secret key
+    memcpy(secret_key+sizeof(SECRET_KEY_PART)-1, payload->password_hash, SHA_256_STR_LEN);
+    printf("%s\n", secret_key);
+
+    // The password must be MD5 hashed to 0x41 bytes, but the encoding requires a size of 0x80.
+    // A password buffer of 0x41 means that the actual payload struct would be 0x81 in length.
+    // Something seems off here -- It could be a weird Netgear implementation
+    crypted_payload_len = EncodeString((char*)payload, crypted_payload, sizeof(*payload)-1, secret_key, strlen(secret_key));
+    if (crypted_payload_len == -1) {
+        fprintf(stderr, "Failed to encrypt payload\n");
+        goto out;
+    }
+
+out:
+    return crypted_payload_len;
+}
+
+static int enable_telnet(const char *rhost, const char *rhost_mac_addr, const char *username, const char *password) {
+    int status = -1;
+    struct payload payload = {};
+    char *crypted_payload = NULL;
+    ssize_t crypted_payload_len = -1;
+
+    fill_payload(rhost_mac_addr, username, password, &payload);
+
+    crypted_payload_len = generate_crypted_payload(&payload, &crypted_payload);
+    if (crypted_payload_len == -1) {
+        fprintf(stderr, "Failed to generated encrypted payload\n");
+        goto out;
+    }
+
+    send_payload(rhost, PORT, crypted_payload, crypted_payload_len);
+
+    status = 0;
+out:
+    free(crypted_payload);
+    return status;
+}
+
 int main(int argc, char * argv[])
 {
 	int datasize;
 	int i;
 
-	if ( argc!=4 && argc!=5 )
+	if ( argc!=5 )
 		usage(argv[0]);
 
-	if ( strlen(argv[2]) != 12 ) {
-		fprintf( stderr, "MAC address length must be %d\n", 12 );
+	if ( strlen(argv[2]) != MAC_ADDR_STR_LEN ) {
+		fprintf( stderr, "MAC address length must be %d\n", MAC_ADDR_STR_LEN );
 		exit(1);
 	}
-	for( i=0; i<12; i++) {
+	for( i=0; i<MAC_ADDR_STR_LEN; i++) {
 		if ( !isxdigit(argv[2][i]) ) {
 			fprintf( stderr,
 				"Invalid characters in MAC address\n" );
@@ -201,17 +275,10 @@ int main(int argc, char * argv[])
 		exit(1);
 	}
 
-	datasize = fill_payload(argc, argv);
+        if (enable_telnet(argv[1], argv[2], argv[3], argv[4]) != 0) {
+            fprintf(stderr, "Failed to enable telnet\n");
+        }
 
-	if ( strcmp(argv[1], "-") == 0 ) {
-		for (i=0; i<datasize; i++) {
-			printf("%c", output_buf[i]);
-		}
-	} else {
-		int sock = socket_connect(argv[1], PORT);
-		write(sock, output_buf, datasize );
-		close(sock);
-	}
 
 	return 0;
 }
