@@ -1,0 +1,6 @@
+image: matthewtingum/dockerbuild:0.3-rc2
+
+aliases:
+  build:
+    script:
+      - make -j`nproc`

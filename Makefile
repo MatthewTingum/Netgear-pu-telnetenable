@@ -1,6 +1,5 @@
 CC = gcc
-CFLAGS =
-# CFLAGS = -g
+CFLAGS = -static
 
 # Solaris LIBS
 # LIBS = -lresolv -lsocket -lnsl
